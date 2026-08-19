@@ -1,0 +1,441 @@
+/*
+    ===========================================================
+    MOVIE TICKET BOOKING SYSTEM  (C++ OOP Mini Project)
+    ===========================================================
+    Concepts demonstrated:
+      - Classes & Objects
+      - Encapsulation (private data + getters/setters)
+      - Inheritance (Person -> Admin, Customer)
+      - Polymorphism (virtual functions, function overriding)
+      - Abstraction (abstract base class Person)
+      - Operator/function overloading
+      - STL (vector, map)
+      - File Handling (save/load bookings to a .txt file)
+      - Exception Handling
+
+    Compile:  g++ -std=c++17 MovieTicketBookingSystem.cpp -o movieapp
+    Run:      ./movieapp
+    ===========================================================
+*/
+
+#include <iostream>
+#include <vector>
+#include <string>
+#include <iomanip>
+#include <fstream>
+#include <algorithm>
+#include <stdexcept>
+#include <limits>
+
+using namespace std;
+
+void clearInput() {
+    cin.clear();
+    cin.ignore(numeric_limits<streamsize>::max(), '\n');
+}
+
+bool inputExhausted() {
+    return cin.eof();
+}
+
+
+class Seat {
+private:
+    int seatNumber;
+    bool booked;
+
+public:
+    Seat(int num = 0) : seatNumber(num), booked(false) {}
+
+    int getSeatNumber() const { return seatNumber; }
+    bool isBooked() const { return booked; }
+    void bookSeat() { booked = true; }
+    void cancelSeat() { booked = false; }
+};
+
+
+class Movie {
+private:
+    int movieId;
+    string title;
+    string language;
+    string showTime;
+    double price;
+    vector<Seat> seats;
+
+public:
+    Movie(int id, string t, string lang, string time, double p, int totalSeats)
+        : movieId(id), title(t), language(lang), showTime(time), price(p) {
+        for (int i = 1; i <= totalSeats; i++)
+            seats.push_back(Seat(i));
+    }
+
+    int getId() const { return movieId; }
+    string getTitle() const { return title; }
+    string getLanguage() const { return language; }
+    string getShowTime() const { return showTime; }
+    double getPrice() const { return price; }
+    vector<Seat>& getSeats() { return seats; }
+
+    int availableSeats() const {
+        int count = 0;
+        for (const auto& s : seats)
+            if (!s.isBooked()) count++;
+        return count;
+    }
+
+    void displaySeatLayout() const {
+        cout << "\nSeat layout for \"" << title << "\" (X = booked, O = available)\n";
+        for (size_t i = 0; i < seats.size(); i++) {
+            cout << (seats[i].isBooked() ? "[X" : "[O")
+                 << setw(2) << seats[i].getSeatNumber() << "] ";
+            if ((i + 1) % 5 == 0) cout << "\n";
+        }
+        cout << "\n";
+    }
+
+    void display(int index) const {
+        cout << left << setw(4) << index
+             << setw(20) << title
+             << setw(12) << language
+             << setw(10) << showTime
+             << "Rs." << setw(8) << price
+             << "Seats left: " << availableSeats() << "\n";
+    }
+};
+
+class Booking {
+private:
+    static int bookingCounter;
+    int bookingId;
+    string customerName;
+    string movieTitle;
+    vector<int> seatNumbers;
+    double totalAmount;
+
+public:
+    Booking(string custName, string mTitle, vector<int> seats, double amount)
+        : customerName(custName), movieTitle(mTitle), seatNumbers(seats), totalAmount(amount) {
+        bookingId = ++bookingCounter;
+    }
+
+    int getBookingId() const { return bookingId; }
+    double getTotalAmount() const { return totalAmount; }
+
+    void printReceipt() const {
+        cout << "\n---------------- BOOKING RECEIPT ----------------\n";
+        cout << "Booking ID   : " << bookingId << "\n";
+        cout << "Customer     : " << customerName << "\n";
+        cout << "Movie        : " << movieTitle << "\n";
+        cout << "Seats        : ";
+        for (size_t i = 0; i < seatNumbers.size(); i++)
+            cout << seatNumbers[i] << (i + 1 < seatNumbers.size() ? ", " : "");
+        cout << "\nTotal Amount : Rs." << fixed << setprecision(2) << totalAmount << "\n";
+        cout << "---------------------------------------------------\n";
+    }
+
+    // Convert to a single line for file storage
+    string toFileString() const {
+        string seatStr;
+        for (size_t i = 0; i < seatNumbers.size(); i++)
+            seatStr += to_string(seatNumbers[i]) + (i + 1 < seatNumbers.size() ? "-" : "");
+        return to_string(bookingId) + "|" + customerName + "|" + movieTitle + "|" +
+               seatStr + "|" + to_string(totalAmount);
+    }
+};
+int Booking::bookingCounter = 0;
+
+class Person {
+protected:
+    string name;
+    int id;
+
+public:
+    Person(string n, int i) : name(n), id(i) {}
+    virtual void showMenu(class BookingSystem& system) = 0;
+    virtual string getRole() const = 0;
+    virtual ~Person() {}
+};
+
+class BookingSystem;
+
+class Customer : public Person {
+public:
+    Customer(string n, int i) : Person(n, i) {}
+
+    string getRole() const override { return "Customer"; }
+    void showMenu(BookingSystem& system) override;   // defined after BookingSystem
+};
+
+class Admin : public Person {
+public:
+    Admin(string n, int i) : Person(n, i) {}
+
+    string getRole() const override { return "Admin"; }
+    void showMenu(BookingSystem& system) override;   // defined after BookingSystem
+};
+
+class BookingSystem {
+private:
+    vector<Movie> movies;
+    vector<Booking> bookings;
+    const string fileName = "bookings.txt";
+
+public:
+    BookingSystem() {
+        movies.push_back(Movie(1, "Pathaan 2",        "Hindi",   "10:00 AM", 220.0, 20));
+        movies.push_back(Movie(2, "Avengers: Reborn",  "English", "1:30 PM",  280.0, 20));
+        movies.push_back(Movie(3, "KGF 3",             "Kannada", "6:00 PM",  250.0, 20));
+        movies.push_back(Movie(4, "Interstellar 2",    "English", "9:15 PM",  300.0, 20));
+        loadBookingsFromFile();
+    }
+
+    void listMovies() const {
+        cout << "\n===================== NOW SHOWING =====================\n";
+        cout << left << setw(4) << "No" << setw(20) << "Title" << setw(12) << "Language"
+             << setw(10) << "Time" << "Price      Availability\n";
+        cout << "---------------------------------------------------------\n";
+        for (size_t i = 0; i < movies.size(); i++)
+            movies[i].display((int)i + 1);
+        cout << "===========================================================\n";
+    }
+
+    Movie* selectMovie() {
+        listMovies();
+        int choice;
+        cout << "\nEnter movie number to select (0 to cancel): ";
+        cin >> choice;
+        if (cin.fail()) { clearInput(); cout << "Invalid input.\n"; return nullptr; }
+        if (choice == 0) return nullptr;
+        if (choice < 1 || choice > (int)movies.size()) {
+            cout << "Invalid choice.\n";
+            return nullptr;
+        }
+        return &movies[choice - 1];
+    }
+
+    void bookTicket(const string& customerName) {
+        Movie* movie = selectMovie();
+        if (!movie) return;
+
+        movie->displaySeatLayout();
+
+        int numSeats;
+        cout << "How many seats do you want to book? ";
+        cin >> numSeats;
+        if (cin.fail()) {
+            if (inputExhausted()) return;
+            clearInput(); cout << "Invalid number.\n"; return;
+        }
+        if (numSeats <= 0) { cout << "Invalid number.\n"; return; }
+
+        if (numSeats > movie->availableSeats()) {
+            cout << "Not enough seats available!\n";
+            return;
+        }
+
+        vector<int> chosenSeats;
+        for (int i = 0; i < numSeats; i++) {
+            int seatNo;
+            cout << "Enter seat number #" << (i + 1) << ": ";
+            cin >> seatNo;
+            if (cin.fail()) {
+                if (inputExhausted()) return;
+                clearInput(); cout << "Invalid seat number.\n"; i--; continue;
+            }
+
+            bool found = false;
+            for (auto& s : movie->getSeats()) {
+                if (s.getSeatNumber() == seatNo) {
+                    found = true;
+                    if (s.isBooked()) {
+                        cout << "Seat " << seatNo << " already booked. Choose another.\n";
+                        i--;
+                    } else {
+                        s.bookSeat();
+                        chosenSeats.push_back(seatNo);
+                    }
+                    break;
+                }
+            }
+            if (!found) {
+                cout << "No such seat exists. Try again.\n";
+                i--;
+            }
+        }
+
+        double total = numSeats * movie->getPrice();
+        Booking newBooking(customerName, movie->getTitle(), chosenSeats, total);
+        bookings.push_back(newBooking);
+        saveBookingToFile(newBooking);
+        newBooking.printReceipt();
+        cout << "Booking confirmed!\n";
+    }
+
+    void viewAllBookings() const {
+        if (bookings.empty()) {
+            cout << "\nNo bookings yet.\n";
+            return;
+        }
+        cout << "\n===================== ALL BOOKINGS =====================\n";
+        for (const auto& b : bookings)
+            b.printReceipt();
+    }
+
+    void addMovie() {
+        string title, lang, time;
+        double price;
+        int totalSeats;
+
+        cin.ignore();
+        cout << "Enter movie title: ";
+        getline(cin, title);
+        cout << "Enter language: ";
+        getline(cin, lang);
+        cout << "Enter show time (e.g. 5:00 PM): ";
+        getline(cin, time);
+        cout << "Enter ticket price: ";
+        cin >> price;
+        cout << "Enter total seats: ";
+        cin >> totalSeats;
+
+        if (cin.fail() || price <= 0 || totalSeats <= 0) {
+            clearInput();
+            cout << "Invalid movie details.\n";
+            return;
+        }
+
+        int newId = (int)movies.size() + 1;
+        movies.push_back(Movie(newId, title, lang, time, price, totalSeats));
+        cout << "Movie added successfully!\n";
+    }
+
+    double totalRevenue() const {
+        double total = 0;
+        for (const auto& b : bookings)
+            total += b.getTotalAmount();
+        return total;
+    }
+
+    // ---------------- File Handling ----------------
+    void saveBookingToFile(const Booking& b) {
+        ofstream out(fileName, ios::app);
+        if (!out) {
+            cout << "Warning: could not write to file.\n";
+            return;
+        }
+        out << b.toFileString() << "\n";
+        out.close();
+    }
+
+    void loadBookingsFromFile() {
+        ifstream in(fileName);
+        if (!in) return;
+        string line;
+        int count = 0;
+        while (getline(in, line)) count++;
+        if (count > 0)
+            cout << "(" << count << " previous booking record(s) found in " << fileName << ")\n";
+        in.close();
+    }
+};
+
+void Customer::showMenu(BookingSystem& system) {
+    int choice;
+    do {
+        cout << "\n--------- CUSTOMER MENU (" << name << ") ---------\n";
+        cout << "1. View Now Showing Movies\n";
+        cout << "2. Book Ticket\n";
+        cout << "3. View My Receipts (all bookings)\n";
+        cout << "0. Logout\n";
+        cout << "Enter choice: ";
+        cin >> choice;
+        if (cin.fail()) {
+            if (inputExhausted()) { cout << "\nInput ended.\n"; return; }
+            clearInput(); choice = -1;
+        }
+
+        switch (choice) {
+            case 1: system.listMovies(); break;
+            case 2: system.bookTicket(name); break;
+            case 3: system.viewAllBookings(); break;
+            case 0: cout << "Logging out...\n"; break;
+            default: cout << "Invalid choice, try again.\n";
+        }
+    } while (choice != 0);
+}
+
+void Admin::showMenu(BookingSystem& system) {
+    int choice;
+    do {
+        cout << "\n----------- ADMIN MENU (" << name << ") -----------\n";
+        cout << "1. View Movies\n";
+        cout << "2. Add New Movie\n";
+        cout << "3. View All Bookings\n";
+        cout << "4. View Total Revenue\n";
+        cout << "0. Logout\n";
+        cout << "Enter choice: ";
+        cin >> choice;
+        if (cin.fail()) {
+            if (inputExhausted()) { cout << "\nInput ended.\n"; return; }
+            clearInput(); choice = -1;
+        }
+
+        switch (choice) {
+            case 1: system.listMovies(); break;
+            case 2: system.addMovie(); break;
+            case 3: system.viewAllBookings(); break;
+            case 4: cout << "Total Revenue: Rs." << fixed << setprecision(2)
+                          << system.totalRevenue() << "\n"; break;
+            case 0: cout << "Logging out...\n"; break;
+            default: cout << "Invalid choice, try again.\n";
+        }
+    } while (choice != 0);
+}
+
+int main() {
+    cout << "=====================================================\n";
+    cout << "        WELCOME TO THE MOVIE TICKET BOOKING SYSTEM\n";
+    cout << "=====================================================\n";
+
+    BookingSystem system;
+    int choice;
+    do {
+        cout << "\n1. Login as Customer\n";
+        cout << "2. Login as Admin\n";
+        cout << "0. Exit\n";
+        cout << "Enter choice: ";
+        cin >> choice;
+
+        if (cin.fail()) {
+            if (inputExhausted()) { cout << "\nInput ended.\n"; break; }
+            clearInput(); choice = -1;
+        }
+
+        try {
+            if (choice == 1) {
+                string name;
+                cout << "Enter your name: ";
+                cin.ignore();
+                getline(cin, name);
+                Customer c(name, 1);
+                c.showMenu(system);
+            } else if (choice == 2) {
+                string name;
+                cout << "Enter admin name: ";
+                cin.ignore();
+                getline(cin, name);
+                Admin a(name, 1);
+                a.showMenu(system);
+            } else if (choice != 0) {
+                cout << "Invalid choice.\n";
+            }
+        } catch (const exception& e) {
+            cout << "Error: " << e.what() << "\n";
+        }
+
+    } while (choice != 0);
+
+    cout << "\nThank you for using the Movie Ticket Booking System!\n";
+    return 0;
+}
